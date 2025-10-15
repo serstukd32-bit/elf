@@ -29,4 +29,4 @@ ENV WEBAPP_HOST=0.0.0.0 \
     WEBHOOK_URL=""
 
 # Start the bot (webhook mode if WEBHOOK_URL set, otherwise polling)
-CMD ["python", "ELF.py"]
+CMD ["python", "Elf.py"]

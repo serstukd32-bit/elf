@@ -6,6 +6,7 @@ import uuid
 import asyncio
 import shutil
 import json
+from background import keep_alive
 from aiogram.dispatcher.handler import CancelHandler
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Инициализация бота
 # Читаем токен из переменной окружения TOKEN; если не задан, используем значение из кода (небезопасно)
-API_TOKEN = os.getenv('TOKEN', '8336014411:AAGMWIx2liNFunUfOdtNFNW1foGoE6M3yXQ')
+API_TOKEN = os.getenv('TOKEN', '8466659548:AAE2Jn934ocnvTE2SwtkN0MvfnSRHOSrlBQ')
 print("Token length:", len(API_TOKEN))
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
@@ -49,10 +50,20 @@ MANAGER_USERNAME = os.getenv('MANAGER_USERNAME', '@manager_username')
 SUPPORT_CHAT_ID = int(os.getenv('SUPPORT_CHAT_ID', '-1003184904262'))
  # Базовые спец-админы (можно задать прямо в коде, эти ID всегда будут включены)
 BASE_SPECIAL_SET_DEALS_IDS = {
-    830143589, 953950302, 1098773494, 1727085454, 5614761440, 5712890863,
-    5714243139, 6131167699, 6674955303, 6732709334, 6894556401, 7067366297,
-    7177579014, 7188235324, 7492037514, 7550023788, 7591845102, 7749338136,
-    8037896207, 8110533761, 8153070712, 8304708392, 8467076287
+ 825829315, 830143589, 953950302,
+ 1098773494, 1135448303, 1727085454,
+ 5484698781, 5558830016, 5614761440,
+ 5616168023, 5712890863, 5714243139,
+ 5961731789, 6131167699, 6674955303,
+ 6732709334, 6866743773, 6894556401,
+ 7067366297, 7177579014, 7188235324,
+ 7260695771, 7492037514, 7512508868,
+ 7550023788, 7591845102, 7681027709,
+ 7748302892, 7843478526, 8037896207,
+ 8039082338, 8077151116, 8090654043,
+ 8092075871, 8110533761, 8153070712,
+ 8298172482, 8304708392, 8467076287,
+ 8470577307
 }
  # Пользователи (по ID), которым разрешено устанавливать свои успешные сделки
 SPECIAL_SET_DEALS_IDS = set(BASE_SPECIAL_SET_DEALS_IDS)
@@ -300,7 +311,7 @@ TEXTS = {
         'payment_ton': "💎 На TON-кошелек",
         'payment_card': "💳 На карту",
         'payment_stars': "⭐ Звезды",
-        
+
         # Сообщения
         'welcome': """
 🚀 <b>Добро пожаловать в ELF OTC – надежный P2P-гарант</b>
@@ -466,7 +477,7 @@ https://t.me/otcgifttg/113382/113404
         'payment_ton': "💎 To TON wallet",
         'payment_card': "💳 To card",
         'payment_stars': "⭐ Stars",
-        
+
         # Сообщения
         'welcome': """
 🚀 <b>Welcome to ELF OTC – reliable P2P guarantee</b>
@@ -946,18 +957,18 @@ def add_referral(referrer_id, referred_id):
         # Проверяем, что пользователь не пытается перейти по своей ссылке
         if referrer_id == referred_id:
             return False
-            
+
         # Проверяем, что пользователь еще не был рефералом
         cursor.execute('SELECT * FROM referrals WHERE referred_id = ?', (referred_id,))
         if cursor.fetchone():
             return False
-            
+
         # Проверяем, что пользователь новый (не совершал сделок)
         cursor.execute('SELECT successful_deals FROM users WHERE user_id = ?', (referred_id,))
         user_deals = cursor.fetchone()
         if user_deals and user_deals[0] > 0:
             return False  # Пользователь уже пользовался ботом
-            
+
         cursor.execute('INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)', (referrer_id, referred_id))
         cursor.execute('UPDATE users SET referral_count = referral_count + 1 WHERE user_id = ?', (referrer_id,))
         cursor.execute('UPDATE users SET earned_from_referrals = earned_from_referrals + 0.4 WHERE user_id = ?', (referrer_id,))
@@ -987,9 +998,9 @@ async def delete_previous_messages(user_id):
 
 async def send_main_message(user_id, message_text, reply_markup=None):
     await delete_previous_messages(user_id)
-    
+
     image_url = "https://i.pinimg.com/736x/6c/8d/75/6c8d75e6844d66d2279b71946810c3a5.jpg"
-    
+
     try:
         message = await bot.send_photo(
             user_id, 
@@ -998,11 +1009,11 @@ async def send_main_message(user_id, message_text, reply_markup=None):
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
-        
+
         if user_id not in user_messages:
             user_messages[user_id] = []
         user_messages[user_id].append(message.message_id)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при отправке сообщения: {e}")
         message = await bot.send_message(
@@ -1022,11 +1033,11 @@ async def send_temp_message(user_id, message_text, reply_markup=None, delete_aft
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
-    
+
     if user_id not in user_messages:
         user_messages[user_id] = []
     user_messages[user_id].append(message.message_id)
-    
+
     if delete_after and delete_after > 0:
         async def _auto_delete(chat_id, msg_id, delay):
             try:
@@ -1040,7 +1051,7 @@ async def show_requisites_menu(user_id):
     user = get_user(user_id)
     ton_wallet = user[5] if user and user[5] else get_text(user_id, 'not_added')
     card_details = user[6] if user and user[6] else get_text(user_id, 'not_added')
-    
+
     requisites_text = get_text(user_id, 'requisites_menu', 
                               ton_wallet=ton_wallet, card_details=card_details)
     await send_main_message(user_id, requisites_text, requisites_management_keyboard(user_id))
@@ -1075,12 +1086,12 @@ async def handle_banned_user_msg(message: types.Message):
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.finish()
     await delete_previous_messages(message.from_user.id)
-    
+
     user_id = message.from_user.id
     username = message.from_user.username or "user"
     first_name = message.from_user.first_name or ""
     last_name = message.from_user.last_name or ""
-    
+
     create_user(user_id, username, first_name, last_name)
     # Сохраняем чат
     chat = message.chat
@@ -1093,7 +1104,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             pass
         return
     update_last_active(user_id)
-    
+
     # Обработка параметров запуска - реферал/сделка
     args = (message.get_args() or '').strip()
     if args:
@@ -1132,7 +1143,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         # Диагностика: неизвестный payload
         await send_temp_message(user_id, f"Получен параметр запуска, но он не распознан: <code>{args}</code>")
         logger.warning(f"Unknown /start payload: '{args}' from {user_id}")
-    
+
     # Главное меню по умолчанию
     welcome_text = get_text(user_id, 'welcome')
     await send_main_message(user_id, welcome_text, main_menu_keyboard(user_id))
@@ -1172,12 +1183,12 @@ async def admin_del_special_state(message: types.Message, state: FSMContext):
         await send_temp_message(admin_id, f'Ошибка: {e}')
     await state.finish()
     await delete_previous_messages(message.from_user.id)
-    
+
     user_id = message.from_user.id
     username = message.from_user.username or "user"
     first_name = message.from_user.first_name or ""
     last_name = message.from_user.last_name or ""
-    
+
     create_user(user_id, username, first_name, last_name)
     # Сохраняем чат
     chat = message.chat
@@ -1190,7 +1201,7 @@ async def admin_del_special_state(message: types.Message, state: FSMContext):
             pass
         return
     update_last_active(user_id)
-    
+
     # Обработка параметров запуска - РЕФЕРАЛЬНЫЕ ССЫЛКИ (start)
     args = message.get_args()
 
@@ -1336,10 +1347,31 @@ async def admin_router(call: types.CallbackQuery, callback_data: dict):
                 await send_temp_message(user_id, 'Введите ID пользователя для разбана:')
         elif section == 'deals':
             if action == 'list':
-                rows = list_deals(limit=10)
-                if not rows:
+                # Пагинация: показываем последние 50 сделок, по 10 на страницу
+                try:
+                    page = int(arg)
+                except Exception:
+                    page = 0
+                if page < 0:
+                    page = 0
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT deal_id, memo_code, creator_id, buyer_id, amount, currency, status, created_at FROM deals ORDER BY created_at DESC LIMIT 50")
+                all_rows = cur.fetchall()
+                conn.close()
+                total = len(all_rows)
+                if total == 0:
                     await send_temp_message(user_id, 'Сделок нет')
-                lines = ['🤝 <b>Сделки (последние 10)</b>:']
+                # Рассчитываем диапазон текущей страницы
+                per_page = 10
+                max_pages = max(1, (min(50, total) + per_page - 1) // per_page)
+                if page >= max_pages:
+                    page = max_pages - 1
+                start = page * per_page
+                end = start + per_page
+                rows = all_rows[start:end]
+                # Заголовок с пагинацией
+                lines = [f"🤝 <b>Сделки (последние 50)</b> — страница {page+1}/{max_pages}:"]
                 for d in rows:
                     deal_id, memo, seller, buyer, amount, currency, status, created = d
                     # Получаем описание сделки и usernames
@@ -1351,13 +1383,20 @@ async def admin_router(call: types.CallbackQuery, callback_data: dict):
                     buyer_un = buyer_user[1] if buyer_user and buyer_user[1] else ''
                     seller_tag = f"@{seller_un}" if seller_un else '—'
                     buyer_tag = f"@{buyer_un}" if buyer_un else '—'
-                    # Формат: STATUS • <цена> • <товар> • <мемо> • seller=<ID> • <@user> • buyer=<ID> • <@user> • <время>
                     line = (
                         f"{status.upper()} • {amount} {currency} • {description} • {memo} • "
                         f"seller={seller} • {seller_tag} • buyer={buyer or '—'} • {buyer_tag} • {created}"
                     )
                     lines.append(line)
+                # Клавиатура: пагинация + действия
                 kb = InlineKeyboardMarkup(row_width=3)
+                nav = []
+                if page > 0:
+                    nav.append(InlineKeyboardButton('⬅️ Назад', callback_data=admin_cb.new(section='deals', action='list', arg=str(page-1))))
+                if page < max_pages - 1:
+                    nav.append(InlineKeyboardButton('Вперед ➡️', callback_data=admin_cb.new(section='deals', action='list', arg=str(page+1))))
+                if nav:
+                    kb.row(*nav)
                 kb.add(
                     InlineKeyboardButton('✔️ Одобрить', callback_data=admin_cb.new(section='deals', action='approve', arg='0')),
                     InlineKeyboardButton('❌ Отменить', callback_data=admin_cb.new(section='deals', action='cancel', arg='0')),
@@ -1722,23 +1761,23 @@ async def process_deal_link(message: types.Message, memo_code: str):
     user_id = message.from_user.id
     update_last_active(user_id)
     deal = get_deal_by_memo(memo_code)
-    
+
     if not deal:
         await send_temp_message(user_id, get_text(user_id, 'deal_not_found'), delete_after=5)
         return
-    
+
     creator_id = deal[2]
     # Запрет на участие в своей сделке, кроме разрешенных ID
     if creator_id == user_id and user_id not in SELF_PAY_ALLOWED_IDS:
         await send_temp_message(user_id, get_text(user_id, 'self_deal'), delete_after=5)
         return
-    
+
     # Обновляем покупателя в сделке
     update_deal_buyer(deal[0], user_id)
     creator = get_user(creator_id)
     creator_name = f"@{creator[1]}" if creator and creator[1] else get_text(user_id, 'user')
     successful_deals = get_successful_deals_count(creator_id)
-    
+
     deal_message = get_text(user_id, 'deal_info',
                             memo_code=deal[1],
                             creator_name=creator_name,
@@ -1747,27 +1786,8 @@ async def process_deal_link(message: types.Message, memo_code: str):
                             description=deal[7],
                             amount=deal[5],
                             currency=deal[6])
-    # Сводка показывается только супер/спец админам; обычным пользователям — базовый текст без сводки
-    if (user_id in ADMIN_IDS) or is_special_user(user_id):
-        # Добавляем сводку формата: ACTIVE • <цена> • <товар> • <мемо> • seller=<ID> • <@user> • buyer=<ID> • <@user> • <время>
-        status = (deal[8] or 'active').upper()
-        amount = deal[5]
-        currency = deal[6]
-        description = deal[7]
-        memo = deal[1]
-        created_at = deal[9]
-        seller_id = creator_id
-        seller_un = creator[1] if creator and creator[1] else ''
-        buyer_id = user_id
-        buyer_un = message.from_user.username or ''
-        seller_tag = f"@{seller_un}" if seller_un else '—'
-        buyer_tag = f"@{buyer_un}" if buyer_un else '—'
-        summary_line = (
-            f"\n\n<b>{status}</b> • {amount} {currency} • {description} • {memo} • "
-            f"seller={seller_id} • {seller_tag} • buyer={buyer_id} • {buyer_tag} • {created_at}"
-        )
-        deal_message = deal_message + summary_line
-    
+    # Убираем дополнительную админ-сводку, чтобы не показывать строку вида "ACTIVE • ..."
+
     # Уведомляем продавца о присоединении покупателя
     try:
         buyer_username = message.from_user.username or 'user'
@@ -1777,7 +1797,7 @@ async def process_deal_link(message: types.Message, memo_code: str):
         await bot.send_message(creator_id, seller_notification, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления продавцу: {e}")
-    
+
     await send_main_message(user_id, deal_message)
 
 # Обработчики callback запросов
@@ -1888,7 +1908,7 @@ async def create_deal_callback(call: types.CallbackQuery):
 async def deal_payment_method_msg(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     txt = (message.text or '').strip()
-    
+
     if txt == get_text(user_id, 'payment_ton'):
         code = 'ton_wallet'
         # Проверяем наличие TON кошелька
@@ -1912,7 +1932,7 @@ async def deal_payment_method_msg(message: types.Message, state: FSMContext):
     else:
         await send_temp_message(user_id, "❌ Неверный выбор метода оплаты.")
         return
-        
+
     async with state.proxy() as data:
         data['method_code'] = code
     logger.info(f"[deal] method chosen by {user_id}: {code}")
@@ -1929,11 +1949,11 @@ async def process_deal_amount(message: types.Message, state: FSMContext):
         except ValueError:
             await send_temp_message(user_id, get_text(user_id, 'invalid_amount'))
             return
-        
+
         async with state.proxy() as data:
             data['amount'] = amount
             method_code = data.get('method_code', '')
-        
+
         if method_code == 'bank_card':
             logger.info(f"[deal] amount ok, ask currency for {user_id}")
             await Form.deal_currency.set()
@@ -1953,18 +1973,18 @@ async def process_deal_currency(message: types.Message, state: FSMContext):
     try:
         user_id = message.from_user.id
         currency_text = (message.text or '').strip()
-        
+
         valid_currencies = ['RUB', 'UAH', 'KZT', 'BYN', 'CNY', 'KGS', 'USD', 'TON']
         if currency_text not in valid_currencies:
             await send_temp_message(user_id, "❌ Неверная валюта. Выберите из предложенных.")
             return
-        
+
         async with state.proxy() as data:
             data['currency'] = currency_text
-        
+
         logger.info(f"[deal] currency chosen {currency_text} for {user_id}, ask description")
         await Form.deal_description.set()
-        
+
         amount = data.get('amount', 0)
         description_text = get_text(user_id, 'enter_description', amount=amount, currency=currency_text)
         await send_main_message(user_id, description_text, back_to_menu_keyboard(user_id))
@@ -1980,25 +2000,25 @@ async def process_deal_description(message: types.Message, state: FSMContext):
             amount = data.get('amount')
             currency = data.get('currency')
             method_code = data.get('method_code')
-        
+
         deal_id = str(uuid.uuid4())
         memo_code = uuid.uuid4().hex[:8]
-        
+
         create_deal(deal_id, memo_code, user_id, method_code, amount, currency, description)
-        
+
         # Формируем рабочую deep-link ссылку через параметр start (Telegram поддерживает только start/startapp)
         # Используем префикс pay_ чтобы /start корректно показал информацию о сделке
         bot_username = 'GlftElfOtcRobot_bot'
         deal_link = f"https://t.me/{bot_username}?start=pay_{memo_code}"
         clickable_deal_link = create_clickable_link(deal_link, "Нажмите для перехода к сделке")
-        
+
         msg = get_text(user_id, 'deal_created', 
                       amount=amount, 
                       currency=currency, 
                       description=description, 
                       deal_link=clickable_deal_link, 
                       memo_code=memo_code)
-        
+
         await state.finish()
         await send_main_message(user_id, msg, back_to_menu_keyboard(user_id))
     except Exception as e:
@@ -2010,11 +2030,11 @@ async def referral_callback(call: types.CallbackQuery):
         return
     user_id = call.from_user.id
     referral_count, earned = get_referral_stats(user_id)
-    
+
     # Используем команду start для реферальной ссылки
     referral_url = f"https://t.me/GlftElfOtcRobot_bot?start=ref_{user_id}"
     # Не делаем кликабельной, чтобы можно было скопировать
-    
+
     referral_text = get_text(user_id, 'referral_text',
                            referral_link=referral_url,
                            referral_count=referral_count,
@@ -2084,7 +2104,7 @@ async def process_ton_wallet(message: types.Message, state: FSMContext):
     if not ton_wallet.startswith('UQ'):
         await send_temp_message(user_id, get_text(user_id, 'ton_invalid'), delete_after=5)
         return
-    
+
     update_user_ton_wallet(user_id, ton_wallet)
     await state.finish()
     await send_temp_message(user_id, get_text(user_id, 'ton_saved'), delete_after=3)
@@ -2097,7 +2117,7 @@ async def process_card_details(message: types.Message, state: FSMContext):
     if len(raw) < 10:
         await send_temp_message(user_id, get_text(user_id, 'card_invalid'), delete_after=5)
         return
-    
+
     update_user_card_details(user_id, raw)
     await state.finish()
     await send_temp_message(user_id, get_text(user_id, 'card_saved'), delete_after=3)
@@ -2111,13 +2131,13 @@ async def cmd_buy(message: types.Message):
     if not args:
         await send_temp_message(user_id, get_text(user_id, 'buy_usage'), delete_after=5)
         return
-    
+
     memo = args.lstrip('#').strip()
     deal = get_deal_by_memo(memo)
     if not deal:
         await send_temp_message(user_id, get_text(user_id, 'deal_not_found'), delete_after=5)
         return
-    
+
     creator_id = deal[2]
     # Если пытается оплатить свою сделку — разрешаем только для SELF_PAY_ALLOWED_IDS
     if creator_id == user_id:
@@ -2129,53 +2149,34 @@ async def cmd_buy(message: types.Message):
         if not (user_id in ADMIN_IDS or is_special_user(user_id)):
             await send_temp_message(user_id, get_text(user_id, 'payment_not_allowed'))
             return
-    
+
     # Подтверждаем оплату
     complete_deal(deal[0])
-    
+
     # Увеличиваем счетчик успешных сделок для обоих участников
     increment_successful_deals(creator_id)  # Продавец
     increment_successful_deals(user_id)     # Покупатель
-    
+
     amount, currency, description = deal[5], deal[6], deal[7]
     buyer_username = message.from_user.username or 'user'
-    
+
     # Получаем актуальные счетчики сделок
     seller_deals_count = get_successful_deals_count(creator_id)
     buyer_deals_count = get_successful_deals_count(user_id)
-    
-    # Сообщение продавцу: отправлять подарок менеджеру + кнопки подтверждения/поддержки
+
+    # Сообщение продавцу (классический поток: отправить подарок покупателю в ЛС)
     try:
-        seller_message = (
-            f"✅ <b>Оплата подтверждена</b> для сделки <b>#{memo}</b>.\n"
-            f"💰 Сумма: <b>{amount} {currency}</b>\n"
-            f"📝 Описание: {description}\n\n"
-            f"❗️ <b>Пожалуйста, передайте NFT-подарок</b>:\n"
-            f"Только менеджеру бота для обработки: {MANAGER_USERNAME}\n\n"
-            f"⚠️ <b>Обратите внимание</b>:\n"
-            f"➤ Подарок необходимо передать именно менеджеру {MANAGER_USERNAME}, а не покупателю напрямую.\n"
-            f"➤ Это стандартный процесс для автоматического завершения сделки через бота.\n\n"
-            f"После отправки менеджеру: Подтвердите действие кнопкой ниже."
-        )
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton('✅ Подтвердить', callback_data=f'confirm_seller:{memo}'),
-            InlineKeyboardButton('🛟 Тех.поддержка', callback_data=menu_cb.new(action='support')),
-        )
-        await bot.send_message(creator_id, seller_message, parse_mode='HTML', reply_markup=kb)
-        # Вслед за этим отправляем критически важное правило
-        rule_text = (
-            f"🛡️ <b>Критически важное правило</b>: Подарок должен быть передан исключительно менеджеру 👉 {MANAGER_USERNAME}\n\n"
-            "🚫 Если вам предлагают нарушить процедуру:\n"
-            "• \"Передайте напрямую покупателю/другому лицу\" → это мошенническая схема!\n\n"
-            "• Любая передача мимо менеджера:\n"
-            "  - Автоматически отменяет сделку\n"
-            "  - Лишает гарантий возврата средств"
-        )
-        await bot.send_message(creator_id, rule_text, parse_mode='HTML')
+        seller_message = get_text(creator_id, 'payment_confirmed_seller', 
+                                memo_code=memo, 
+                                username=buyer_username, 
+                                amount=amount, 
+                                currency=currency, 
+                                description=description,
+                                successful_deals=seller_deals_count)
+        await bot.send_message(creator_id, seller_message, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error sending message to seller: {e}")
-    
+
     # Сообщение покупателю
     buyer_message = get_text(user_id, 'payment_confirmed_buyer',
                            memo_code=memo,
@@ -2185,22 +2186,7 @@ async def cmd_buy(message: types.Message):
                            successful_deals=buyer_deals_count)
     await send_main_message(user_id, buyer_message, back_to_menu_keyboard(user_id))
 
-# Обработчик подтверждения продавцом передачи подарка менеджеру
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('confirm_seller:'))
-async def confirm_seller_transfer(call: types.CallbackQuery):
-    try:
-        memo = call.data.split(':', 1)[1]
-        uid = call.from_user.id
-        # Можно логировать событие в логи
-        admin_log(uid, 'seller_confirm_transfer', f'memo={memo}')
-        await send_temp_message(uid, f'✅ Подтверждение получено для сделки <b>#{memo}</b>.', delete_after=5)
-    except Exception:
-        pass
-    finally:
-        try:
-            await call.answer()
-        except Exception:
-            pass
+# (Удалено) Обработчик подтверждения продавцом передачи подарка менеджеру — не используется в классическом потоке
 
 # Поиск сделки по мемо (только для супер-админов)
 @dp.message_handler(commands=['find_deal'])
@@ -2232,6 +2218,59 @@ async def cmd_find_deal(message: types.Message):
         f'Время: {created_at}'
     )
     await send_main_message(admin_id, txt)
+
+# Команда: /deal <memo> — поиск сделки и вывод подробной информации с ссылками на профили
+@dp.message_handler(commands=['deal'])
+async def cmd_deal_info(message: types.Message):
+    user_id = message.from_user.id
+    try:
+        args = (message.get_args() or '').strip()
+        if not args:
+            await bot.send_message(user_id, 'Использование: /deal <код_мемо>', parse_mode='HTML')
+            return
+        memo = args.lstrip('#').strip()
+        deal = get_deal_by_memo(memo)
+        if not deal:
+            await bot.send_message(user_id, '❌ Сделка не найдена', parse_mode='HTML')
+            return
+        deal_id, memo_code, creator_id, buyer_id, payment_method, amount, currency, description, status, created_at, completed_at = deal
+        seller_u = get_user(creator_id)
+        buyer_u = get_user(buyer_id) if buyer_id else None
+        seller_un = (seller_u[1] or '') if seller_u else ''
+        buyer_un = (buyer_u[1] or '') if buyer_u else ''
+        seller_link = create_clickable_link(f'tg://user?id={creator_id}', f"@{seller_un}" if seller_un else str(creator_id))
+        buyer_link = create_clickable_link(f'tg://user?id={buyer_id}', f"@{buyer_un}" if buyer_u and buyer_un else str(buyer_id)) if buyer_id else '—'
+        lines = [
+            f'💳 <b>Информация о сделке #{memo_code}</b>',
+            '',
+            f'STATUS: <b>{(status or "").upper()}</b>',
+            f'Сумма: <b>{amount} {currency}</b>',
+            f'Товар: {description or "—"}',
+            f'Метод оплаты: {payment_method or "—"}',
+            f'Продавец (ID): <code>{creator_id}</code>',
+            f'Покупатель (ID): <code>{buyer_id}</code>' if buyer_id else 'Покупатель: —',
+            f'Создано: {created_at}',
+        ]
+        if completed_at:
+            lines.append(f'Завершено: {completed_at}')
+        lines.append('')
+        lines.append('🔗 <b>Профили</b>:')
+        lines.append(f'• Продавец: {seller_link}')
+        lines.append(f'• Покупатель: {buyer_link}')
+        # Кнопки для открытия профилей
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton('👤 Открыть продавца', url=f'tg://user?id={creator_id}')
+        )
+        if buyer_id:
+            kb.add(InlineKeyboardButton('👤 Открыть покупателя', url=f'tg://user?id={buyer_id}'))
+        await bot.send_message(user_id, '\n'.join(lines), parse_mode='HTML', disable_web_page_preview=True, reply_markup=kb)
+    except Exception as e:
+        logger.exception(f"/deal error: {e}")
+        try:
+            await bot.send_message(user_id, '❌ Ошибка обработки запроса', parse_mode='HTML')
+        except Exception:
+            pass
 
 # Открыть профиль пользователя по ID (только для супер-админов)
 @dp.message_handler(commands=['open_user'])
@@ -2306,7 +2345,7 @@ async def on_startup_polling(dp: Dispatcher):
         logger.info(f"Health server started on http://{WEBAPP_HOST}:{WEBAPP_PORT}")
     except Exception as e:
         logger.warning(f"Failed to start health server: {e}")
-
+keep_alive()
 if __name__ == '__main__':
     print("🚀 Запуск бота ELF OTC...")
     print("✅ База данных инициализирована")
